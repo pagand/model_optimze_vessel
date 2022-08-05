@@ -22,7 +22,7 @@ import pickle
 
 
 
-def prep(df_dummy, n_step = 1):
+def prep(df_dummy, n_step = 0):
     X = df_dummy.drop(columns={'ENGINE_1_FUEL_CONSUMPTION','ENGINE_2_FUEL_CONSUMPTION'})
     X = X.drop(columns={'ENGINE_2_FLOWRATEA','ENGINE_1_FLOWRATE','ENGINE_2_FLOWRATE','ENGINE_1_FLOWRATEA','Dati'})
     # feature engineering
@@ -36,7 +36,7 @@ def prep(df_dummy, n_step = 1):
     df_dummy = df_dummy.assign(TORQUE=lambda x: (x.TORQUE_1 +  x.TORQUE_2)/2)
     df_dummy = (df_dummy.assign(OUT=lambda x: (x.ENGINE_1_FUEL_CONSUMPTION +  x.ENGINE_2_FUEL_CONSUMPTION/2/x.DISP*60/10**6)))
 
-    if n_step>1:
+    if n_step>0:
         df_dummy['OUT'] = df_dummy['OUT'].shift(-n_step)
         df_dummy.dropna(inplace=True)
 
@@ -89,7 +89,7 @@ def main():
     dict = {} # feature importance for different methods
     # Save the data frame to a file
     df_dummy = pd.read_pickle('./data/df_dummy.pkl')
-    X, y = prep(df_dummy, n_step=5)
+    X, y = prep(df_dummy, n_step=5) #5
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=2)
 
     # Scaler for X
@@ -118,7 +118,51 @@ def main():
     # plot the result
     plot(y_test, y_pred, 'lin_reg.eps')
 
-    print("done...")
+
+    ## Lasso regression
+    st = time.time()
+    mean_score_train, fi_lr, model = lrm(X_train_scaled, y_train, type = 'lasso')  # type =['lr', 'lasso','ridge']
+    et = time.time()
+    print(f'R^2 Validation: {mean_score_train.mean()}')
+    # saving the results
+    dict['ls'] = {}
+    dict['ls']['importance'] = fi_lr
+    dict['ls']['train_time'] = et - st
+    #test
+    st = time.time()
+    y_pred = model.predict(X_test_scaled)
+    et = time.time()
+    print(f'R^2 Test: {model.score(X_test_scaled, y_test)}')
+    print(f'RMSE Test: {np.sqrt(mean_squared_error(y_test, y_pred))}')
+    dict['ls']['test_time'] = et - st
+    dict['ls']['R2'] = [mean_score_train.mean(), model.score(X_test_scaled, y_test), np.sqrt(mean_squared_error(y_test, y_pred))]
+    dict['ls']['model'] = model
+    # plot the result
+    plot(y_test, y_pred, 'lasso_reg.eps')
+
+
+    ## Ridge regression
+    st = time.time()
+    mean_score_train, fi_lr, model = lrm(X_train_scaled, y_train, type = 'ridge')  # type =['lr', 'lasso','ridge']
+    et = time.time()
+    print(f'R^2 Validation: {mean_score_train.mean()}')
+    # saving the results
+    dict['rg'] = {}
+    dict['rg']['importance'] = fi_lr
+    dict['rg']['train_time'] = et - st
+    #test
+    st = time.time()
+    y_pred = model.predict(X_test_scaled)
+    et = time.time()
+    print(f'R^2 Test: {model.score(X_test_scaled, y_test)}')
+    print(f'RMSE Test: {np.sqrt(mean_squared_error(y_test, y_pred))}')
+    dict['rg']['test_time'] = et - st
+    dict['rg']['R2'] = [mean_score_train.mean(), model.score(X_test_scaled, y_test), np.sqrt(mean_squared_error(y_test, y_pred))]
+    dict['rg']['model'] = model
+    # plot the result
+    plot(y_test, y_pred, 'ridge_reg.eps')
+
+
 
     ## Poly regression
     poly_features = PolynomialFeatures(degree = 2)
@@ -291,7 +335,6 @@ def main():
     dict['xgb']['model'] = xgb_reg.best_estimator_
     # plot the result
     plot(y_test, y_pred, 'xgb_reg.eps')
-
 
 
 

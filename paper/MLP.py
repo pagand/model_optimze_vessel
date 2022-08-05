@@ -33,10 +33,13 @@ import time
 # dataset definition
 class CSVDataset(Dataset):
     # load the dataset
-    def __init__(self, path, normalized = False):
+    def __init__(self, path, normalized = False, n_step=0):
         # load the csv file as a dataframe
         df = read_csv(path, header=0, index_col=0)
         # store the inputs and outputs
+        if n_step > 0:
+            df['OUT'] = df['OUT'].shift(-n_step)
+            df.dropna(inplace=True)
         self.MinOut = df.iloc[:, -1].min()
         self.MaxOut = df.iloc[:, -1].max()
 
@@ -47,6 +50,7 @@ class CSVDataset(Dataset):
 
         self.X = df.values[:, :-1].astype('float32')
         self.y = df.values[:, -1].astype('float32')
+
 
         # ensure target has the right shape
         self.y = self.y.reshape((len(self.y), 1))
@@ -101,7 +105,7 @@ class MLP(Module):
 # prepare the dataset
 def prepare_data(path, normalized):
     # load the dataset
-    dataset = CSVDataset(path, normalized )# normalize input and output
+    dataset = CSVDataset(path, normalized ,n_step= 5)# normalize input and output
 
     # calculate split
     train, test = dataset.get_splits()
@@ -123,7 +127,7 @@ def train_model(train_dl, model, device0):
     optimizer = Adam(model.parameters(), lr=0.007)
 
     # enumerate epochs
-    for epoch in range(1000): #200
+    for epoch in range(1000): #1000
         # if epoch % 10 ==0  and epoch:
         #     print("Epoch %d completed" %epoch)
         # enumerate mini batches
@@ -146,7 +150,7 @@ def train_model(train_dl, model, device0):
 
 
 # evaluate the model
-def evaluate_model(test_dl, model,device0):
+def evaluate_model(test_dl, model, device0):
     predictions, actuals = list(), list()
     for i, (inputs, targets) in enumerate(test_dl):
         # convert to device
@@ -225,7 +229,7 @@ def main():
     # make a single prediction
     dict['mlp']['test_time'] = et - st
     dict['mlp']['R2'] = [r2, r2_test, sqrt(actual_mse)]
-    dict['mlp']['model'] = model
+    #dict['mlp']['model'] = model
     # plotting the results
     y_test = np.zeros(len(test_dl.dataset))
     y_pred = np.zeros(len(test_dl.dataset))
@@ -238,8 +242,9 @@ def main():
 
     plot(y_test, y_pred, "mlp.eps")
 
+    total_params = sum(param.numel() for param in model.parameters())
 
-
+    print(total_params)
 
     with open('saved_dictionary_mlp.pkl', 'wb') as f:
         pickle.dump([dict], f)
