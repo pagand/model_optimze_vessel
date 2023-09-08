@@ -20,9 +20,10 @@ class VesselEnvironment(gym.Env):
     """A stock trading environment for OpenAI gym"""
     metadata = {'render.modes': ['human']}
 
-    def __init__(self, rl_data, model_path="new_3_final.pt", model_loc_path="longlat_0_checkpoint4.pt", scaler=pickle.load(open('minmax_scaler.pkl', 'rb'))):
+    def __init__(self, rl_data, model_path="new_3_final.pt", model_loc_path="longlat_0_checkpoint4.pt", scaler=pickle.load(open('minmax_scaler.pkl', 'rb')), reward_type = "mimic"):
         self.rl_data = rl_data
         self.trip_id = 0
+        self.reward_type = reward_type
         # load best 1% trips to calculate reward1
         self.hn_top = pd.read_csv("H2N_top1.csv")
         self.nh_top = pd.read_csv("N2H_top1.csv")
@@ -201,19 +202,27 @@ class VesselEnvironment(gym.Env):
 
     def _get_reward(self, long, lat, fc):
         # reward 1 distance to the top 1
-        reward1 = ((long-self.top1.loc[self.current_step, "LONGITUDE"])**2 + (lat-self.top1.loc[self.current_step, "LATITUDE"])**2 )**0.5
+        reward1 = -((long-self.top1.loc[self.current_step, "LONGITUDE"])**2 + (lat-self.top1.loc[self.current_step, "LATITUDE"])**2 )**0.5
+        if reward1 > -0.05:
+            reward1 = 0
+        reward1 = reward1*10
         # reward 2 fc and done reward
         reward2 = -fc
         # reward 3 mimicc reward
         if self.current_step < len(self.data):
-            reward3 = ((long-self.data[self.current_step, 19])**2 + (lat-self.data[self.current_step, 18])**2 )**0.5
+            reward3 = -((long-self.data[self.current_step, 19])**2 + (lat-self.data[self.current_step, 18])**2 )**0.5
         else:
-            reward3 = ((long-self.data[-1, 19])**2 + (lat-self.data[-1, 18])**2 )**0.5
+            reward3 = -((long-self.data[-1, 19])**2 + (lat-self.data[-1, 18])**2 )**0.5
         # reward 4 timeout reward
         reward4 = 0
         if self.current_step > 100:
             reward4 = -0.1*((self.current_step-90)//10)
-        return (reward1 + reward2 + reward3 + reward4) / 3
+        if self.reward_type == "mimic":
+            return (reward1 + reward2 + reward3 + reward4) / 4
+        elif self.reward_type == "top1":
+            return (reward1+reward2+reward4) / 3
+        else:
+            return (reward2+reward4) /2
 
     def step(self, action, test=False):
         obs= self._get_observation()
@@ -231,7 +240,7 @@ class VesselEnvironment(gym.Env):
 
         if done:
             reward = reward+1/3
-        return obs, self.reward_cum, done, termination, {}
+        return obs, reward, done, termination, {}
 
 
     def _inv_transform_location(self, lat, long):
