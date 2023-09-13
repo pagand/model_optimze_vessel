@@ -13,14 +13,15 @@ For the Ocean Engineering version, please refer to the OE branch.
 ### Cite:
 
 ```
-  @article{agandecolight,
-  title={Fuel Consumption Prediction for a Passenger Ferry using Machine
-Learning and In-service Data: A Comparative Study},
-  author={Agand, Pedram, Kennedy, Allison, Harris, Trevor, Bae, Chanwoo, Chen, Mo, and Park, J. Park},
-  journal={Ocean Engineering}
+@article{agand2023fuel,
+  title={Fuel consumption prediction for a passenger ferry using machine learning and in-service data: A comparative study},
+  author={Agand, Pedram and Kennedy, Allison and Harris, Trevor and Bae, Chanwoo and Chen, Mo and Park, Edward J},
+  journal={Ocean Engineering},
+  volume={284},
+  pages={115271},
   year={2023},
   publisher={Elsevier}
-  }
+}
 ```
 
 
