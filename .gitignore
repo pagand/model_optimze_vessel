@@ -1,0 +1,7 @@
+data/feature1.csv
+data/rl_data.pkl
+*__pycache__*
+.ipynb_checkpoints
+data/fc_checkpoints*
+optimization/d3rlpy_logs*
+
