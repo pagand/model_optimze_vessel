@@ -102,7 +102,7 @@ For this model, please refer to model/functional
 ### Sequential model
 For this model, please refer to the model/sequential
 
-## Cite:
+## Cite
 
 ```
   @article{agand2023fuel,
