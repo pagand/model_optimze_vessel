@@ -9,10 +9,11 @@ This project is done in collaboration with Simon Fraser University (SFU) and Nat
 1. [Setup](#setup)
 2. [Projects](#projects)
 3. [Dataset](#dataset)
-4. [preprocessing](#preprocessing)
-5. [training](#training)
-6. [Optimization](#optimization)
-
+4. [Gym Environment](#simulator)
+5. [Preprocessing](#preprocessing)
+6. [Training](#training)
+7. [Optimization](#optimization)
+8. [How to cite](#cite)
 
 ## Setup
 Clone the repo, and build the conda environment:
@@ -79,6 +80,9 @@ sh download_data.sh
 
 This will download the normalized trips in the data folder.
 
+
+## Simulator
+For the gym enviroenmt, please refer to the simulator folder.
 
 ## Preprocessing
 
