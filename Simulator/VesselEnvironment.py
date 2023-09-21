@@ -20,13 +20,13 @@ class VesselEnvironment(gym.Env):
     """A stock trading environment for OpenAI gym"""
     metadata = {'render.modes': ['human']}
 
-    def __init__(self, rl_data, model_path="new_3_final.pt", model_loc_path="longlat_0_checkpoint4.pt", scaler=pickle.load(open('minmax_scaler.pkl', 'rb')), reward_type = "mimic"):
+    def __init__(self, rl_data, model_path, model_loc_path, scaler, toptrips, reward_type = "mimic"):
         self.rl_data = rl_data
         self.trip_id = 0
         self.reward_type = reward_type
         # load best 1% trips to calculate reward1
-        self.hn_top = pd.read_csv("H2N_top1.csv")
-        self.nh_top = pd.read_csv("N2H_top1.csv")
+        self.hn_top = toptrips[0]
+        self.nh_top = toptrips[1]
         # set scaler
         self.minmax_scaler = scaler
         # get device
@@ -229,6 +229,7 @@ class VesselEnvironment(gym.Env):
         self.current_step += 1
 
         fc, sog, lat, long = self._take_action(action)
+        # TODO why there is a test flag?
         if test:
             return fc, sog, lat, long
         # get done and termination
@@ -277,8 +278,113 @@ class VesselEnvironment(gym.Env):
                             right=0.90,
                             hspace=0.2,
                             wspace=0.2)
-        # canvas = FigureCanvasTkAgg(fig,master=root_window)
-        # canvas.draw()
+        
         # canvas.get_tk_widget().place(relx=0.15, rely=0.15)
 
         # root_window.mainloop()
+
+        # create a canvas object and place it in the window
+        # canvas = FigureCanvasTkAgg(fig,master=root_window)
+        # canvas.draw()
+        # canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=1)
+
+
+# main function
+def main():
+    # load data
+    with open('data/rl_data.pkl', 'rb') as handle:
+        rl_data = pickle.load(handle)
+    # load scaler
+    scaler=pickle.load(open('data/minmax_scaler.pkl', 'rb'))
+    # load top trips
+    hn_top = pd.read_csv("data/H2N_top1.csv")
+    nh_top = pd.read_csv("data/N2H_top1.csv")
+    toptrips = (hn_top, nh_top)
+    # load forecasting models
+    model_path="data/new_3_final.pt"
+    model_loc_path="data/longlat_0_checkpoint4.pt"
+
+    model_path="data/fc_2_final.pt"
+    model_loc_path="data/longlat_3_final.pt"
+    # create environment
+    env = VesselEnvironment(rl_data, model_path, model_loc_path, scaler, toptrips)
+    fc_predicted = []
+    sog_predicted = []
+    lat_predicted = []
+    long_predicted = []
+    for i in range(1,7):
+        # reset environment
+        env.reset()
+
+
+        length = rl_data[i]["observations"].shape[0]
+        fc = np.zeros((length))
+        sog =  np.zeros((length))
+        lat = np.zeros((length))
+        long = np.zeros((length))
+        for j in range(25, length):
+            action = rl_data[i]["actions"][j]
+            # action[1] = action[1]
+            obs = env.step(action, test=True)
+            fc[j], sog[j], lat[j], long[j] = obs[0], obs[1], obs[2], obs[3]
+            # if done:
+            #     break
+        array1 = np.zeros((length, 12))
+        array1[:, 6] = fc
+        array1[:, 9] = sog
+        array1[:, 7] = lat
+        array1[:, 8] = long
+        array1 = scaler.inverse_transform(array1)
+        fc_predicted.append(array1[:, 6])
+        sog_predicted.append(array1[:, 9])
+        lat_predicted.append(array1[:, 7])
+        long_predicted.append(array1[:, 8])
+    fcs = []
+    sogs = []
+    longs = []
+    lats = []
+    # TODO why i start from 0?
+    for i in range(6):
+        array = np.zeros((len(rl_data[i]["observations"]), 12))
+        array[:, 6] = rl_data[i]["observations"][:, -4]
+        array[:, 9] = rl_data[i]["observations"][:, -3]
+        array[:, 7] = rl_data[i]["observations"][:, -2]
+        array[:, 8] = rl_data[i]["observations"][:, -1]
+        array = scaler.inverse_transform(array)
+        fcs.append(array[:, 6])
+        sogs.append(array[:, 9])
+        lats.append(array[:, 7])
+        longs.append(array[:, 8])
+    # plot
+    def plot(i):
+        fig = plt.figure()
+        grid = plt.GridSpec(2, 2, wspace=0.3, hspace=0.3)
+
+        ax1 = plt.subplot(grid[0, 0])
+        ax2 = plt.subplot(grid[0, 1:])
+        ax3 = plt.subplot(grid[1, :1])
+        ax4 = plt.subplot(grid[1, 1:])
+
+
+        ax1.plot(range(25, len(fc_predicted[i])), fc_predicted[i][25:], label='predictions'.format(i=2))
+        ax1.plot(range(25, len(fc_predicted[i])), fcs[i+1][25:], label='actuals'.format(i=1))
+        ax1.legend(loc='best')
+        ax2.plot(range(25, len(fc_predicted[i])), long_predicted[i][25:], label='predictions'.format(i=2))
+        ax2.plot(range(25, len(fc_predicted[i])), longs[i+1][25:], label='actuals'.format(i=1))
+        ax2.legend(loc='best')
+        ax3.plot(range(25, len(fc_predicted[i])), lat_predicted[i][25:], label='predictions'.format(i=2))
+        ax3.plot(range(25, len(fc_predicted[i])), lats[i+1][25:], label='actuals'.format(i=1))
+        ax3.legend(loc='best')
+        ax4.plot(range(25, len(sog_predicted[i])), sog_predicted[i][25:], label='predictions'.format(i=2))
+        ax4.plot(range(25, len(sog_predicted[i])), sogs[i+1][25:], label='actuals'.format(i=1))
+        ax4.legend(loc='best')
+
+
+
+    plot(0)
+    plot(1)
+    # render
+    env.render()
+
+if __name__ == "__main__":
+    main()
