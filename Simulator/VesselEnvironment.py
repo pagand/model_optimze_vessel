@@ -256,9 +256,24 @@ class VesselEnvironment(gym.Env):
             array[0, indexes[i]] = vals[i]
         transformed_val = self.minmax_scaler.transform(array)[0, [indexes]]
         return transformed_val[0]
+    
+    # create  attribute 'button_click' for button widget
+    def button_click(self):
+        action = self.actions[-1]
+        obs, reward, done, termination, _ = self.step(action)
+        print("step: ", self.current_step, "reward: ", reward, "cumulative reward: ", self.reward_cum)
+        if done:
+            print("Done")
+        if termination:
+            print("Termination")
+        # return reward, done, termination, {}
+        dict = {"obs":obs, "reward":reward, "done":done, "termination":termination}
+        self.render(dict)
+        
 
 
-    def render(self, mode="human"):
+
+    def render(self, dict =None):
         lat, long = self.obs[:, -2].copy(), self.obs[:, -1].copy()
         for i in range(len(lat)):
             lat[i], long[i] = self._inv_transform_location(lat[i],long[i])
@@ -279,14 +294,66 @@ class VesselEnvironment(gym.Env):
                             hspace=0.2,
                             wspace=0.2)
         
-        # canvas.get_tk_widget().place(relx=0.15, rely=0.15)
+        #define the GUI root
+        root = tk.Tk()
+        # title
+        root.title("West coast vessel simulator")
+        # create a canvas object and display it
+        canvas = FigureCanvasTkAgg(fig, master=root)
+        root.geometry('640x480')
+        canvas.draw()
+        canvas.get_tk_widget().grid(row=0, column=0, columnspan=2, sticky=W+E+N+S)
+        
+        # create a button widget which will be linked to the button_click function
+        button = Button(root, text="Next Step", command=self.button_click)
+        button.grid(row=1, column=0, sticky=W+E+N+S)
+        # create a button widget which will be linked to the button_click function
+        button = Button(root, text="Reset", command=self.reset)
+        button.grid(row=1, column=1, sticky=W+E+N+S)
 
-        # root_window.mainloop()
+        # create a checkbox widget to let user input actions manually
+        manual = IntVar()
+        manual.set(0)
+        manual_label = Label(root, text="Manual")
+        manual_label.grid(row=2, column=0, sticky=W+E+N+S)
+        manual_entry = Checkbutton(root, text="Manual", variable=manual)
+        manual_entry.grid(row=2, column=1, sticky=W+E+N+S)
 
-        # create a canvas object and place it in the window
-        # canvas = FigureCanvasTkAgg(fig,master=root_window)
-        # canvas.draw()
-        # canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=1)
+        # show the current step, reward and cumulative reward in the GUI in colomn 1
+        step_label = Label(root, text="Step: "+str(self.current_step))
+        step_label.grid(row=1, column=1, sticky=W+E+N+S)
+        reward_label = Label(root, text="Reward: "+str(round(reward, 3)))
+
+        if manual:
+            # get actions: speed, heading, mode from the user
+            speed = DoubleVar()
+            heading = DoubleVar()
+            mode = IntVar()
+            speed.set(0.5)
+            heading.set(0.5)
+            mode.set(0)
+            speed_label = Label(root, text="Speed")
+            speed_label.grid(row=3, column=0, sticky=W+E+N+S)
+            speed_entry = Entry(root, textvariable=speed)
+            speed_entry.grid(row=3, column=1, sticky=W+E+N+S)
+            heading_label = Label(root, text="Heading")
+            heading_label.grid(row=4, column=0, sticky=W+E+N+S)
+            heading_entry = Entry(root, textvariable=heading)
+            heading_entry.grid(row=4, column=1, sticky=W+E+N+S)
+            mode_label = Label(root, text="Mode")
+            mode_label.grid(row=5, column=0, sticky=W+E+N+S)
+            mode_entry = Entry(root, textvariable=mode)
+            mode_entry.grid(row=5, column=1, sticky=W+E+N+S)
+
+            # create a button widget which will be linked to the button_click function
+            button = Button(root, text="Submit", command=lambda: self.button_submit(speed, heading, mode))
+            button.grid(row=6, column=0, sticky=W+E+N+S)
+
+
+        # start the GUI event loop
+        root.mainloop()
+
+
 
 
 # main function
@@ -308,6 +375,10 @@ def main():
     model_loc_path="data/longlat_3_final.pt"
     # create environment
     env = VesselEnvironment(rl_data, model_path, model_loc_path, scaler, toptrips)
+    env.reset()
+    env.render()
+
+
     fc_predicted = []
     sog_predicted = []
     lat_predicted = []
