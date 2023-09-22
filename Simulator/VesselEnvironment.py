@@ -53,7 +53,9 @@ class VesselEnvironment(gym.Env):
     """A stock trading environment for OpenAI gym"""
     metadata = {'render.modes': ['human']}
     # model = [tf_loc, gru_loc, tf_fc, gru_fc]
-    def __init__(self, rl_data, models=None, scaler=minmax_scaler):
+    def __init__(self, rl_data, models=None, scaler=minmax_scaler, 
+                 toptrips=["../data/H2N_top1.csv", "../data/N2H_top1.csv"],
+                 reward_type = "mimic"):
         self.rl_data = rl_data
         self.trip_id = 0
         # load best 1% trips to calculate reward1
@@ -214,6 +216,7 @@ class VesselEnvironment(gym.Env):
         reward1 = - ((long-self.top1.loc[self.current_step, "LONGITUDE"])**2 + (lat-self.top1.loc[self.current_step, "LATITUDE"])**2 )**0.5
         if reward1 > -0.05:
             reward1 = 0
+        reward1 = reward1*10
         # reward 2 fc and done reward
         reward2 = -fc
         # reward 3 mimic reward
@@ -226,7 +229,12 @@ class VesselEnvironment(gym.Env):
         if self.current_step >= 100:
             reward4 = -0.1*((self.current_step-90)//10)
         return (reward1 + reward2 + reward3 + reward4) / 4
-
+        if self.reward_type == "mimic":
+            return (reward1 + reward2 + reward3 + reward4) / 4
+        elif self.reward_type == "top1":
+            return (reward1+reward2+reward4) / 3
+        else:
+            return (reward2+reward4) /2
     def step(self, action):
         obs= self._get_observation()
         self.current_step += 1
