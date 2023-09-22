@@ -12,8 +12,6 @@ from tkinter import *
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
-with open('../data/minmax_scaler.pkl', 'rb') as handle:
-    minmax_scaler = pickle.load(handle)
 
 class GRU_update(nn.Module):
     def __init__(self, input_size, hidden_size=1, output_size=4, num_layers=1, prediction_horizon=5, device="cpu"):
@@ -53,9 +51,7 @@ class VesselEnvironment(gym.Env):
     """A stock trading environment for OpenAI gym"""
     metadata = {'render.modes': ['human']}
     # model = [tf_loc, gru_loc, tf_fc, gru_fc]
-    def __init__(self, rl_data, models=None, scaler=minmax_scaler, 
-                 toptrips=["../data/H2N_top1.csv", "../data/N2H_top1.csv"],
-                 reward_type = "mimic"):
+    def __init__(self, rl_data, scaler, toptrips, models_file_path, reward_type = "mimic"):
         self.rl_data = rl_data
         self.trip_id = 0
         # load best 1% trips to calculate reward1
@@ -69,20 +65,18 @@ class VesselEnvironment(gym.Env):
         else:
             self.device = torch.device('cpu')
         # load forecasting models
-        if models is None:
-            self._load_model()
-        else:
-            self.tf_loc, self.gru_loc, self.tf_fc, self.gru_fc = models
+        
+        self._load_model(models_file_path)
         self._set_eval()
 
-    def _load_model(self):
+    def _load_model(self, file_path):
         # load transformer for longitude latitude prediction
         config_loc = InformerConfig.from_pretrained("huggingface/informer-tourism-monthly", 
                 prediction_length=5, context_length=24, input_size=2, num_time_features=1,
                 num_dynamic_real_features = 16, num_static_real_features = 4,
                 lags_sequence=[1], num_static_categorical_features=0, feature_size=27)
         self.tf_loc = InformerForPrediction(config_loc).to(self.device)
-        self.tf_loc.load_state_dict(torch.load("../data/gruloc_3_checkpoint22.pt",
+        self.tf_loc.load_state_dict(torch.load(file_path[0],
                 map_location=torch.device(self.device)))
 
         # load transformer for fc sog prediction
@@ -91,15 +85,15 @@ class VesselEnvironment(gym.Env):
                 num_dynamic_real_features = 11, num_static_real_features = 4,
                 lags_sequence=[1], num_static_categorical_features=0, feature_size=22)
         self.tf_fc = InformerForPrediction(config_fc).to(self.device)
-        self.tf_fc.load_state_dict(torch.load("../data/gru_5_checkpoint16.pt",
+        self.tf_fc.load_state_dict(torch.load(file_path[1],
                 map_location=torch.device(self.device)))
 
         # load gru models
         self.gru_loc = GRU_update(2, hidden_size=425, output_size=2, num_layers=1, prediction_horizon=5, device=self.device).to(self.device)
         self.gru_fc = GRU_update(2, hidden_size=300, output_size=2, num_layers=1, prediction_horizon=5, device=self.device).to(self.device)
-        self.gru_loc.load_state_dict(torch.load("../data/gruloc_3_checkpoint22_gru.pt",
+        self.gru_loc.load_state_dict(torch.load(file_path[2],
                 map_location=torch.device(self.device)))
-        self.gru_fc.load_state_dict(torch.load("../data/gru_5_checkpoint16_gru.pt",
+        self.gru_fc.load_state_dict(torch.load(file_path[3],
                 map_location=torch.device(self.device)))
         
     # set to models eval mode
@@ -376,16 +370,19 @@ def main():
     hn_top = pd.read_csv("data/H2N_top1.csv")
     nh_top = pd.read_csv("data/N2H_top1.csv")
     toptrips = (hn_top, nh_top)
-    # load forecasting models
-    model_path="data/new_3_final.pt"
-    model_loc_path="data/longlat_0_checkpoint4.pt"
 
-    model_path="data/fc_2_final.pt"
-    model_loc_path="data/longlat_3_final.pt"
+    # load models
+    # [tf_loc, gru_loc, tf_fc, gru_fc]
+    file_path = (
+    "data/gruloc_3_checkpoint22.pt",
+    "data/gru_5_checkpoint16.pt",
+    "data/gru_5_checkpoint16_gru.pt",
+    "data/gruloc_3_checkpoint22_gru.pt")
+
     # create environment
-    env = VesselEnvironment(rl_data, model_path, model_loc_path, scaler, toptrips)
+    env = VesselEnvironment(rl_data, scaler, toptrips, file_path)
     env.reset()
-    env.render()
+    # env.render()
 
 
     fc_predicted = []
