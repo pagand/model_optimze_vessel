@@ -1,3 +1,4 @@
+import os
 import pickle
 import random
 import gym
@@ -11,7 +12,6 @@ import tkinter as tk
 from tkinter import *
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-
 
 class GRU_update(nn.Module):
     def __init__(self, input_size, hidden_size=1, output_size=4, num_layers=1, prediction_horizon=5, device="cpu"):
@@ -52,8 +52,10 @@ class VesselEnvironment(gym.Env):
     metadata = {'render.modes': ['human']}
     # model = [tf_loc, gru_loc, tf_fc, gru_fc]
     def __init__(self, rl_data, scaler, toptrips, models_file_path, reward_type = "mimic"):
+
         self.rl_data = rl_data
         self.trip_id = 0
+        self.reward_type = reward_type
         # load best 1% trips to calculate reward1
         self.hn_top = toptrips[0]
         self.nh_top = toptrips[1]
@@ -65,7 +67,6 @@ class VesselEnvironment(gym.Env):
         else:
             self.device = torch.device('cpu')
         # load forecasting models
-        
         self._load_model(models_file_path)
         self._set_eval()
 
@@ -222,13 +223,14 @@ class VesselEnvironment(gym.Env):
         reward4 = 0
         if self.current_step >= 100:
             reward4 = -0.1*((self.current_step-90)//10)
-        return (reward1 + reward2 + reward3 + reward4) / 4
+        # return (reward1 + reward2 + reward3 + reward4) / 4
         if self.reward_type == "mimic":
             return (reward1 + reward2 + reward3 + reward4) / 4
         elif self.reward_type == "top1":
             return (reward1+reward2+reward4) / 3
         else:
             return (reward2+reward4) /2
+
     def step(self, action):
         obs= self._get_observation()
         self.current_step += 1
@@ -259,24 +261,9 @@ class VesselEnvironment(gym.Env):
             array[0, indexes[i]] = vals[i]
         transformed_val = self.scaler.transform(array)[0, [indexes]]
         return transformed_val[0]
-    
-    # create  attribute 'button_click' for button widget
-    def button_click(self):
-        action = self.actions[-1]
-        obs, reward, done, termination, _ = self.step(action)
-        print("step: ", self.current_step, "reward: ", reward, "cumulative reward: ", self.reward_cum)
-        if done:
-            print("Done")
-        if termination:
-            print("Termination")
-        # return reward, done, termination, {}
-        dict = {"obs":obs, "reward":reward, "done":done, "termination":termination}
-        self.render(dict)
-        
 
 
-
-    def render(self, dict =None):
+    def render(self, mode="human"):
         lat, long = self.obs[:, -2].copy(), self.obs[:, -1].copy()
         for i in range(len(lat)):
             lat[i], long[i] = self._inv_transform_location(lat[i], long[i])
@@ -357,6 +344,10 @@ class VesselEnvironment(gym.Env):
         root.mainloop()
 
 
+        # create a canvas object and place it in the window
+        # canvas = FigureCanvasTkAgg(fig,master=root_window)
+        # canvas.draw()
+        # canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=1)
 
 
 # main function
@@ -372,12 +363,12 @@ def main():
     toptrips = (hn_top, nh_top)
 
     # load models
-    # [tf_loc, gru_loc, tf_fc, gru_fc]
+    # [tf_loc, tf_fc, gru_loc, gru_fc]
     file_path = (
     "data/gruloc_3_checkpoint22.pt",
     "data/gru_5_checkpoint16.pt",
-    "data/gru_5_checkpoint16_gru.pt",
-    "data/gruloc_3_checkpoint22_gru.pt")
+    "data/gruloc_3_checkpoint22_gru.pt",
+    "data/gru_5_checkpoint16_gru.pt")
 
     # create environment
     env = VesselEnvironment(rl_data, scaler, toptrips, file_path)
@@ -402,8 +393,8 @@ def main():
         for j in range(25, length):
             action = rl_data[i]["actions"][j]
             # action[1] = action[1]
-            obs = env.step(action, test=True)
-            fc[j], sog[j], lat[j], long[j] = obs[0], obs[1], obs[2], obs[3]
+            obs = env.step(action)[0][-1, :]
+            fc[j], sog[j], lat[j], long[j] = obs[-4], obs[-3], obs[-2], obs[-1]
             # if done:
             #     break
         array1 = np.zeros((length, 12))
@@ -456,12 +447,6 @@ def main():
         ax4.plot(range(25, len(sog_predicted[i])), sogs[i+1][25:], label='actuals'.format(i=1))
         ax4.legend(loc='best')
 
-
-
-    plot(0)
-    plot(1)
-    # render
-    env.render()
 
 if __name__ == "__main__":
     main()
