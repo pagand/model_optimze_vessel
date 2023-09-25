@@ -22,6 +22,10 @@ class VesselEnvironment(gym.Env):
 
     def __init__(self, rl_data, model_path, model_loc_path, scaler, toptrips, reward_type = "mimic"):
         self.rl_data = rl_data
+        self.manual = False
+        self.run = False
+        self.done =False
+        self.max_steps = 124
         self.trip_id = 0
         self.reward_type = reward_type
         # load best 1% trips to calculate reward1
@@ -56,6 +60,7 @@ class VesselEnvironment(gym.Env):
         # initialize values
         self.current_step = 25
         self.reward_cum = 0
+        self.reward = 0
         self.obs = np.zeros([1,19], dtype=np.float64)
         self.actions = np.zeros([1,3], dtype=np.float64)
 
@@ -218,11 +223,13 @@ class VesselEnvironment(gym.Env):
         if self.current_step > 100:
             reward4 = -0.1*((self.current_step-90)//10)
         if self.reward_type == "mimic":
-            return (reward1 + reward2 + reward3 + reward4) / 4
+            self.reward = (reward1 + reward2 + reward3 + reward4) / 4
         elif self.reward_type == "top1":
-            return (reward1+reward2+reward4) / 3
+            self.reward = (reward1+reward2+reward4) / 3
         else:
-            return (reward2+reward4) /2
+            self.reward = (reward2+reward4) /2
+        
+        return self.reward
 
     def step(self, action, test=False):
         obs= self._get_observation()
@@ -234,13 +241,15 @@ class VesselEnvironment(gym.Env):
             return fc, sog, lat, long
         # get done and termination
         done = (((long-self.goal_long_t)**2 + (lat-self.goal_lat_t)**2) < 1e-2)
-        termination =  self.current_step >= 124
+        termination =  self.current_step >= self.max_steps
 
         reward = self._get_reward(long, lat, fc)
         self.reward_cum = self.reward_cum + reward
 
         if done:
             reward = reward+1/3
+
+        self.reward = reward
         return obs, reward, done, termination, {}
 
 
@@ -257,31 +266,65 @@ class VesselEnvironment(gym.Env):
         transformed_val = self.minmax_scaler.transform(array)[0, [indexes]]
         return transformed_val[0]
     
-    # create  attribute 'button_click' for button widget
-    def button_click(self):
+    def _reset(self):
+        self.fig, self.ax = plt.subplots()
+        self.fig.set_size_inches(5.5, 3.5)
+        self.reset()
+        self.status = "Reset"
+        self._update_results()
+    
+    # create  attribute '_next_step' for button widget
+    def _next_step(self, flag=False):
+        if self.manual:
+            self.actions = np.append(self.actions, np.expand_dims(np.array([self.speed_var.get(), self.heading_var.get(), self.mode_var.get()]), 0), axis=0)
+            
+        else: # from dataset
+            self.actions = np.append(self.actions, np.expand_dims(np.array(self.rl_data[self.trip_id]["actions"][self.current_step]), 0), axis=0)
         action = self.actions[-1]
-        obs, reward, done, termination, _ = self.step(action)
-        print("step: ", self.current_step, "reward: ", reward, "cumulative reward: ", self.reward_cum)
-        if done:
+        obs, reward, self.done, termination, _ = self.step(action)
+        print("step: ", self.current_step, "reward: ", reward, "cumulative reward: ", self.reward_cum, self.manual)
+        if self.done:
             print("Done")
         if termination:
             print("Termination")
-        # return reward, done, termination, {}
-        dict = {"obs":obs, "reward":reward, "done":done, "termination":termination}
-        self.render(dict)
+        self.root.update()
+        if not flag:
+            self.status = "Done"
+        self._update_results()
+        
         
 
+    def _resume(self):
+        if self.run:
+            self.run = False
+            self.status = "Stopped"
+            self._update_results()
+        else:
+            self.run = True
+            self.status = "Running ..."
+        while self.run and self.current_step < self.max_steps and not self.done:
+            self.status = "Running ..."
+            self._next_step(flag=True)
+            self.root.update()
+            # make delay
+            self.root.after(1000)
+        
+        if self.current_step > self.max_steps:
+            self.status = "Reached max steps"
+        if self.done:
+            self.status = "Reached goal"
+        self._update_results()
 
 
-    def render(self, dict =None):
+    def _update_results(self):
+        root = self.root
+        # figures
         lat, long = self.obs[:, -2].copy(), self.obs[:, -1].copy()
         for i in range(len(lat)):
             lat[i], long[i] = self._inv_transform_location(lat[i],long[i])
-        # generate the figure and plot object which will be linked to the root element
-        fig, ax = plt.subplots()
-        fig.set_size_inches(3.5, 3.5)
+        
         # ax.scatter(long_lat[:,1],long_lat[:,0],c=stw, s=1)
-        ax.scatter(long,lat, s=1)
+        self.ax.scatter(long,lat, s=1)
         # ax.set_xlim(xmin = -124.0, xmax= -123.2)
         # ax.set_ylim(ymin=49.15, ymax=49.45)
         plt.xticks(fontsize=7)
@@ -294,61 +337,128 @@ class VesselEnvironment(gym.Env):
                             hspace=0.2,
                             wspace=0.2)
         
+        canvas = FigureCanvasTkAgg(self.fig, master=root)
+        canvas.draw()
+        canvas.get_tk_widget().grid(row=0, column=0, columnspan=3, sticky=W+E+N+S)
+    
+        # show the current step, reward and cumulative reward in the GUI in colomn 1
+        step_label = Label(root, text="Step: "+str(self.current_step))
+        step_label.grid(row=2, column=0, sticky=W+E+N+S)
+        reward_label = Label(root, text="Current Reward: "+str(round(self.reward, 3)))
+        reward_label.grid(row=2, column=2, sticky=W+E+N+S)
+        reward_cum_label = Label(root, text="Cumulative Reward: "+str(round(self.reward_cum, 3)))
+        reward_cum_label.grid(row=2, column=1, sticky=W+E+N+S)
+        current_engine_label = Label(root, text="Type: Manual" if self.manual else "Type: Auto")
+        current_engine_label.grid(row=3, column=0, sticky=W+E+N+S)
+
+
+        # show the observation in the GUI in colomn 1
+        obs_label = Label(root, text="Observations: " + \
+                          "\nFC: "+str(round(self.obs[-1, 16], 3)) +\
+                          "\nSOG: "+str(round(self.obs[-1, 17], 3)) +\
+                            "\nLatitude: "+str(round(self.obs[-1, 18], 3)) +\
+                            "\nLongitude: "+str(round(self.obs[-1, 19], 3)) +\
+                          "\nTime: "+str(round(self.obs[-1, 0], 3)) + \
+                          "\nTurn: "+str(round(self.obs[-1, 1], 3))  + \
+                            "\nAcceleration: "+str(round(self.obs[-1, 2], 3))  + \
+                            "\nDistance: "+str(round(self.obs[-1, 5], 3))+ \
+                            "\nCurrent: "+str(round(self.obs[-1, 6], 3))+ \
+                            "\nWind Force: "+str(round(self.obs[-1, 9], 3))+ \
+                            "\nWind Direction: "+str(round(self.obs[-1, 10], 3))+ \
+                            "\nResist Ratio: "+str(round(self.obs[-1, 11], 3))+ \
+                            "\nIs Weekday: "+str(round(self.obs[-1, 12], 3))+ \
+                            "\nSeason: "+str(round(self.obs[-1, 14], 3))+ \
+                            "\nHour: "+str(round(self.obs[-1, 15], 3))+ \
+                            "\nDirection: "+str(round(self.obs[-1, 13], 3)))
+        obs_label.grid(row=0, column=3, sticky=W+E+N+S)
+
+
+        #   show the actions in the GUI in colomn 1
+        obs_label = Label(root, text="Applied actions ")
+        obs_label.grid(row=3, column=2, sticky=W+E+N+S)
+        obs_label = Label(root, text=str(round(self.actions[-1, 0], 3)))
+        obs_label.grid(row=4, column=2, sticky=W+E+N+S)
+        obs_label = Label(root, text=str(round(self.actions[-1, 1], 3)))
+        obs_label.grid(row=5, column=2, sticky=W+E+N+S)
+        obs_label = Label(root, text=str(round(self.actions[-1, 2], 3)))
+        obs_label.grid(row=6, column=2, sticky=W+E+N+S)
+
+        status_label = Label(root, text="Status: \n"+self.status)
+        status_label.grid(row=2, column=3, rowspan=2, sticky=W+E+N+S)
+
+
+            
+            
+
+
+    def render(self):
+        
         #define the GUI root
+        self.status = "Innitialized"
         root = tk.Tk()
+        self.root  = root
         # title
         root.title("West coast vessel simulator")
         # create a canvas object and display it
-        canvas = FigureCanvasTkAgg(fig, master=root)
-        root.geometry('640x480')
-        canvas.draw()
-        canvas.get_tk_widget().grid(row=0, column=0, columnspan=2, sticky=W+E+N+S)
+        root.geometry('700x480')
+
+
+        # generate the figure and plot object which will be linked to the root element
+        self.fig, self.ax = plt.subplots()
+        self.fig.set_size_inches(5.5, 3.5)
+
+        # update the results
+        self._update_results()
+
+        # create a button widget which will be linked to the button_click function
+        button1 = Button(root, text="Next Step", command=self._next_step)
+        button1.grid(row=1, column=0, sticky=W+E+N+S)
+        # create a button widget which will be linked to the reset function
+        button2 = Button(root, text="Reset", command=self._reset)
+        button2.grid(row=1, column=1, sticky=W+E+N+S)
         
-        # create a button widget which will be linked to the button_click function
-        button = Button(root, text="Next Step", command=self.button_click)
-        button.grid(row=1, column=0, sticky=W+E+N+S)
-        # create a button widget which will be linked to the button_click function
-        button = Button(root, text="Reset", command=self.reset)
-        button.grid(row=1, column=1, sticky=W+E+N+S)
 
-        # create a checkbox widget to let user input actions manually
-        manual = IntVar()
-        manual.set(0)
-        manual_label = Label(root, text="Manual")
-        manual_label.grid(row=2, column=0, sticky=W+E+N+S)
-        manual_entry = Checkbutton(root, text="Manual", variable=manual)
-        manual_entry.grid(row=2, column=1, sticky=W+E+N+S)
+        def _switchButtonState():
+            if (mode_entry['state'] == tk.NORMAL):
+                speed_entry['state'] = tk.DISABLED
+                heading_entry['state'] = tk.DISABLED
+                mode_entry['state'] = tk.DISABLED
+                self.manual = False
+            else:
+                speed_entry['state'] = tk.NORMAL
+                heading_entry['state'] = tk.NORMAL
+                mode_entry['state'] = tk.NORMAL
+                self.manual = True
 
-        # show the current step, reward and cumulative reward in the GUI in colomn 1
-        step_label = Label(root, text="Step: "+str(self.current_step))
-        step_label.grid(row=1, column=1, sticky=W+E+N+S)
-        reward_label = Label(root, text="Reward: "+str(round(reward, 3)))
+        # create button widget that change label from auto to manual and viceversal as click with the states
+        button3 = tk.Button(root, text="Auto/manual",command = _switchButtonState)
+        button3.grid(row=1, column=3, sticky=W+E+N+S)
 
-        if manual:
-            # get actions: speed, heading, mode from the user
-            speed = DoubleVar()
-            heading = DoubleVar()
-            mode = IntVar()
-            speed.set(0.5)
-            heading.set(0.5)
-            mode.set(0)
-            speed_label = Label(root, text="Speed")
-            speed_label.grid(row=3, column=0, sticky=W+E+N+S)
-            speed_entry = Entry(root, textvariable=speed)
-            speed_entry.grid(row=3, column=1, sticky=W+E+N+S)
-            heading_label = Label(root, text="Heading")
-            heading_label.grid(row=4, column=0, sticky=W+E+N+S)
-            heading_entry = Entry(root, textvariable=heading)
-            heading_entry.grid(row=4, column=1, sticky=W+E+N+S)
-            mode_label = Label(root, text="Mode")
-            mode_label.grid(row=5, column=0, sticky=W+E+N+S)
-            mode_entry = Entry(root, textvariable=mode)
-            mode_entry.grid(row=5, column=1, sticky=W+E+N+S)
 
-            # create a button widget which will be linked to the button_click function
-            button = Button(root, text="Submit", command=lambda: self.button_submit(speed, heading, mode))
-            button.grid(row=6, column=0, sticky=W+E+N+S)
+        button4 = tk.Button(root, text="Resume/stop",command = self._resume)
+        button4.grid(row=1, column=2, sticky=W+E+N+S)
 
+
+
+        self.speed_var = DoubleVar()
+        self.heading_var = DoubleVar()
+        self.mode_var = IntVar()
+        self.speed_var.set(0.5)
+        self.heading_var.set(0.5)
+        self.mode_var.set(0)
+        speed_label = Label(root, text="Speed")
+        speed_label.grid(row=4, column=0, sticky=W+E+N+S)
+        speed_entry = Entry(root, textvariable=self.speed_var, state=tk.DISABLED)
+        speed_entry.grid(row=4, column=1, sticky=W+E+N+S)
+        heading_label = Label(root, text="Heading")
+        heading_label.grid(row=5, column=0, sticky=W+E+N+S)
+        heading_entry = Entry(root, textvariable=self.heading_var, state=tk.DISABLED)
+        heading_entry.grid(row=5, column=1, sticky=W+E+N+S)
+        mode_label = Label(root, text="Mode")
+        mode_label.grid(row=6, column=0, sticky=W+E+N+S)
+        mode_entry = Entry(root, textvariable=self.mode_var, state=tk.DISABLED)
+        mode_entry.grid(row=6, column=1, sticky=W+E+N+S)
+        
 
         # start the GUI event loop
         root.mainloop()
