@@ -446,7 +446,9 @@ def main():
         ax4.plot(range(25, len(sog_predicted[i])), sog_predicted[i][25:], label='predictions'.format(i=2))
         ax4.plot(range(25, len(sog_predicted[i])), sogs[i+1][25:], label='actuals'.format(i=1))
         ax4.legend(loc='best')
-
+        plt.show()
+    plot(0)    
+    plot(1)
 
 if __name__ == "__main__":
     main()
