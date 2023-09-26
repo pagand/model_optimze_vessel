@@ -267,8 +267,7 @@ class VesselEnvironment(gym.Env):
         return transformed_val[0]
     
     def _reset(self):
-        self.fig, self.ax = plt.subplots()
-        self.fig.set_size_inches(5.5, 3.5)
+        self.ax.clear()
         self.reset()
         self.status = "Reset"
         self._update_results()
