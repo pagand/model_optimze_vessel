@@ -71,7 +71,6 @@ class VesselEnvironment(gym.Env):
         else:
             self.device = torch.device('cpu')
         # load forecasting models
-<<<<<<< HEAD
         self._load_model(models_file_path)
         self._set_eval()
 
@@ -108,24 +107,6 @@ class VesselEnvironment(gym.Env):
         self.gru_loc.eval()
         self.tf_fc.eval()
         self.tf_loc.eval()
-=======
-        configuration = TimeSeriesTransformerConfig(prediction_length=5,
-        context_length=18, input_size=2, num_time_features=1,
-        num_dynamic_real_features = 14, num_static_real_features = 4,
-        return_dict = True)
-        model = TimeSeriesTransformerForPrediction(configuration).to(self.device)
-        model.load_state_dict(torch.load(model_path,map_location=torch.device(self.device)))
-        model.eval()
-        self.model = model
-
-        configuration_loc = TimeSeriesTransformerConfig(prediction_length=5,
-        context_length=18, input_size=2, num_time_features=1,
-        num_dynamic_real_features = 14, num_static_real_features = 4,
-        return_dict = True)
-        model_loc = TimeSeriesTransformerForPrediction(configuration_loc).to(self.device)
-        model_loc.load_state_dict(torch.load(model_loc_path,map_location=torch.device(self.device)))
-        model_loc.eval()
-        self.model_loc = model_loc
 
         # initialize values
         self.current_step = 25
@@ -133,7 +114,6 @@ class VesselEnvironment(gym.Env):
         self.reward = 0
         self.obs = np.zeros([1,19], dtype=np.float64)
         self.actions = np.zeros([1,3], dtype=np.float64)
->>>>>>> main
 
     def _get_observation(self):
         return self.obs[-25:]
@@ -271,25 +251,16 @@ class VesselEnvironment(gym.Env):
         fc, sog, lat, long = self._take_action(action)
 
         # get done and termination
-<<<<<<< HEAD
         done = (((long-self.goal_long)**2 + (lat-self.goal_lat)**2) < 1e-2)
-        termination =  self.current_step >= 124
-=======
-        done = (((long-self.goal_long_t)**2 + (lat-self.goal_lat_t)**2) < 1e-2)
         termination =  self.current_step >= self.max_steps
->>>>>>> main
 
         reward = self._get_reward(long, lat, fc)
         self.reward_cum = self.reward_cum + reward
 
         if done:
-<<<<<<< HEAD
-            reward = reward+1
-=======
             reward = reward+1/3
 
         self.reward = reward
->>>>>>> main
         return obs, reward, done, termination, {}
 
 
@@ -305,8 +276,6 @@ class VesselEnvironment(gym.Env):
             array[0, indexes[i]] = vals[i]
         transformed_val = self.scaler.transform(array)[0, [indexes]]
         return transformed_val[0]
-<<<<<<< HEAD
-=======
     
     def _reset(self):
         self.ax.clear()
@@ -334,7 +303,6 @@ class VesselEnvironment(gym.Env):
         self._update_results()
         
         
->>>>>>> main
 
     def _resume(self):
         if self.run:
@@ -357,15 +325,6 @@ class VesselEnvironment(gym.Env):
             self.status = "Reached goal"
         self._update_results()
 
-<<<<<<< HEAD
-    def render(self, mode="human"):
-        lat, long = self.obs[:, -2].copy(), self.obs[:, -1].copy()
-        for i in range(len(lat)):
-            lat[i], long[i] = self._inv_transform_location(lat[i], long[i])
-        # generate the figure and plot object which will be linked to the root element
-        fig, ax = plt.subplots()
-        fig.set_size_inches(3.5, 3.5)
-=======
 
     def _update_results(self):
         root = self.root
@@ -374,7 +333,6 @@ class VesselEnvironment(gym.Env):
         for i in range(len(lat)):
             lat[i], long[i] = self._inv_transform_location(lat[i],long[i])
         
->>>>>>> main
         # ax.scatter(long_lat[:,1],long_lat[:,0],c=stw, s=1)
         self.ax.scatter(long,lat, s=1)
         # ax.set_xlim(xmin = -124.0, xmax= -123.2)
@@ -544,7 +502,8 @@ def main():
 
     # create environment
     env = VesselEnvironment(rl_data, scaler, toptrips, file_path)
-    # env.render()
+    env.reset()
+    env.render()
 
 
     fc_predicted = []
