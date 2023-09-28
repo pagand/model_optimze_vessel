@@ -1,26 +1,58 @@
-import gym
-from gym import spaces
+import os
 import pickle
+import random
+import gym
 import pandas as pd
 import numpy as np
-import random
+import torch
+import torch.nn as nn
+from sklearn.preprocessing import MinMaxScaler
+from transformers import InformerForPrediction, InformerConfig
 import tkinter as tk
 from tkinter import *
 import matplotlib.pyplot as plt
-import torch
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
-from transformers import TimeSeriesTransformerConfig, TimeSeriesTransformerForPrediction
-# from transformers import InformerConfig, InformerForPrediction
-import pandas as pd
-import numpy as np
-import pickle
-from sklearn.preprocessing import MinMaxScaler
 
+class GRU_update(nn.Module):
+    def __init__(self, input_size, hidden_size=1, output_size=4, num_layers=1, prediction_horizon=5, device="cpu"):
+        super().__init__()
+        self.device = device
+        self.h = prediction_horizon
+        self.hidden_size = hidden_size
+        self.output_size = output_size
+        self.gru = nn.GRU(input_size, hidden_size, num_layers, batch_first=True)
+        self.mlp = nn.Sequential( nn.ReLU(),
+                                  nn.Linear(hidden_size, 2048),
+                                  nn.Dropout(0.2),
+                                  nn.ReLU(),
+                                  nn.Linear(2048, output_size))
+        self.hx_fc = nn.Linear(2*hidden_size, hidden_size)
+
+    def forward(self, predicted_values, past_time_features):
+        xy = torch.zeros(size=(past_time_features.shape[0], 1, self.output_size)).float().to(self.device)
+        hx = past_time_features.reshape(-1, 1, self.hidden_size)
+        hx = hx.permute(1, 0, 2)
+        out_wp = list()
+        for i in range(self.h):
+            ins = torch.cat([xy, predicted_values[:, i:i+1, :]], dim=1) # x
+            hx, _ = self.gru(ins, hx.contiguous())
+            hx = hx.reshape(-1, 2*self.hidden_size)
+            hx = self.hx_fc(hx)
+            d_xy = self.mlp(hx).reshape(-1, 1, self.output_size) #control v4
+            hx = hx.reshape(1, -1, self.hidden_size)
+            # print("dxy", d_xy)
+            xy = xy + d_xy
+            # print("xy plused", xy)
+            out_wp.append(xy)
+        pred_wp = torch.stack(out_wp, dim=1).squeeze(2)
+        return pred_wp
+    
 class VesselEnvironment(gym.Env):
     """A stock trading environment for OpenAI gym"""
     metadata = {'render.modes': ['human']}
+    # model = [tf_loc, gru_loc, tf_fc, gru_fc]
+    def __init__(self, rl_data, scaler, toptrips, models_file_path, reward_type = "mimic"):
 
-    def __init__(self, rl_data, model_path, model_loc_path, scaler, toptrips, reward_type = "mimic"):
         self.rl_data = rl_data
         self.manual = False
         self.run = False
@@ -32,30 +64,49 @@ class VesselEnvironment(gym.Env):
         self.hn_top = toptrips[0]
         self.nh_top = toptrips[1]
         # set scaler
-        self.minmax_scaler = scaler
+        self.scaler = scaler
         # get device
         if torch.cuda.is_available():
             self.device = torch.device('cuda:0')
         else:
             self.device = torch.device('cpu')
         # load forecasting models
-        configuration = TimeSeriesTransformerConfig(prediction_length=5,
-        context_length=18, input_size=2, num_time_features=1,
-        num_dynamic_real_features = 14, num_static_real_features = 4,
-        return_dict = True)
-        model = TimeSeriesTransformerForPrediction(configuration).to(self.device)
-        model.load_state_dict(torch.load(model_path,map_location=torch.device(self.device)))
-        model.eval()
-        self.model = model
+        self._load_model(models_file_path)
+        self._set_eval()
 
-        configuration_loc = TimeSeriesTransformerConfig(prediction_length=5,
-        context_length=18, input_size=2, num_time_features=1,
-        num_dynamic_real_features = 14, num_static_real_features = 4,
-        return_dict = True)
-        model_loc = TimeSeriesTransformerForPrediction(configuration_loc).to(self.device)
-        model_loc.load_state_dict(torch.load(model_loc_path,map_location=torch.device(self.device)))
-        model_loc.eval()
-        self.model_loc = model_loc
+    def _load_model(self, file_path):
+        # load transformer for longitude latitude prediction
+        config_loc = InformerConfig.from_pretrained("huggingface/informer-tourism-monthly", 
+                prediction_length=5, context_length=24, input_size=2, num_time_features=1,
+                num_dynamic_real_features = 16, num_static_real_features = 4,
+                lags_sequence=[1], num_static_categorical_features=0, feature_size=27)
+        self.tf_loc = InformerForPrediction(config_loc).to(self.device)
+        self.tf_loc.load_state_dict(torch.load(file_path[0],
+                map_location=torch.device(self.device)))
+
+        # load transformer for fc sog prediction
+        config_fc = InformerConfig.from_pretrained("huggingface/informer-tourism-monthly", 
+                prediction_length=5, context_length=24, input_size=2, num_time_features=1,
+                num_dynamic_real_features = 11, num_static_real_features = 4,
+                lags_sequence=[1], num_static_categorical_features=0, feature_size=22)
+        self.tf_fc = InformerForPrediction(config_fc).to(self.device)
+        self.tf_fc.load_state_dict(torch.load(file_path[1],
+                map_location=torch.device(self.device)))
+
+        # load gru models
+        self.gru_loc = GRU_update(2, hidden_size=425, output_size=2, num_layers=1, prediction_horizon=5, device=self.device).to(self.device)
+        self.gru_fc = GRU_update(2, hidden_size=300, output_size=2, num_layers=1, prediction_horizon=5, device=self.device).to(self.device)
+        self.gru_loc.load_state_dict(torch.load(file_path[2],
+                map_location=torch.device(self.device)))
+        self.gru_fc.load_state_dict(torch.load(file_path[3],
+                map_location=torch.device(self.device)))
+        
+    # set to models eval mode
+    def _set_eval(self):
+        self.gru_fc.eval()
+        self.gru_loc.eval()
+        self.tf_fc.eval()
+        self.tf_loc.eval()
 
         # initialize values
         self.current_step = 25
@@ -65,7 +116,7 @@ class VesselEnvironment(gym.Env):
         self.actions = np.zeros([1,3], dtype=np.float64)
 
     def _get_observation(self):
-        return self.obs[-1]
+        return self.obs[-25:]
     
     def reset(self, seed=None):
         # We need the following line to seed self.np_random
@@ -74,94 +125,75 @@ class VesselEnvironment(gym.Env):
             self.trip_id = self.trip_id + 1
         else:
             self.trip_id = 1
+
         self.data = self.rl_data[self.trip_id]["observations"]
         self.current_step = 25
         self.obs = self.rl_data[self.trip_id]["observations"][0:25]
         self.actions = self.rl_data[self.trip_id]["actions"][0:25]
+
         # get direction and other static features
-        self.direction = self.rl_data[self.trip_id]["observations"][0, 12]
+        self.direction = self.rl_data[self.trip_id]["observations"][0, 13]
         self.statics = self.rl_data[self.trip_id]["observations"][0, 12:16]
         if self.direction==1:
             self.top1 = self.hn_top
-            self.goal_long_t, self.goal_lat_t = np.float64(0.9965111208024382), np.float64(0.7729570345408661)
+            self.goal_long, self.goal_lat = np.float64(0.9965111208024382), np.float64(0.7729570345408661)
         else:
             self.top1 = self.nh_top
-            self.goal_long_t, self.goal_lat_t = np.float64(0.0023259194650222526), np.float64(0)
+            self.goal_long, self.goal_lat = np.float64(0.0023259194650222526), np.float64(0)
 
         # calculate the cumulative reward
-        self.reward_cum = np.sum(self.rl_data[self.trip_id]["rewards"][:25, :])/4
+        self.reward_cum = 0
 
         return self._get_observation(), {}
 
     def _take_action(self, action):
         # get actions
         speed, heading, mode = action
-        heading = heading * 360
+        heading = heading
         mode = int(mode>0.5)
         if self.current_step < self.rl_data[self.trip_id]["observations"].shape[0]:
             future_obs = self.rl_data[self.trip_id]["observations"][self.current_step].copy()
         else:
             future_obs = self.rl_data[self.trip_id]["observations"][-1].copy()
-        obs = self.obs.copy()
-        actions = self.actions.copy()
-        # obs_cols = ["Time2", "turn", "acceleration",
-        #    'change_x_factor', 'change_y_factor', "distance",
-        #    'current', 'rain', 'snowfall', 'wind_force', 'wind_direc', "resist_ratio",
-        #    "is_weekday", 'direction', "season", "hour", 
-        #    "FC", "SOG", "LATITUDE", 'LONGITUDE',
-        #    ], 
-        # action_cols = ["SPEED", "HEADING", "MODE"]
-        # time_feature = ["Time2", "SPEED", "HEADING", "MODE", "turn", "acceleration",
-        #     "distance", 'current', 'rain', 'snowfall', 'wind_force', 'wind_direc', "resist_ratio", 
-        #     "FC", "SOG"]
-        # static_categorical_feature = ["is_weekday", 'direction',"season", "hour"]
-        # y_cols = ["FC2", "SOG4"]
-        # dynamic_real_feature = [["Time2", "SPEED", "HEADING", "MODE", "turn", "acceleration",
-        #     "change_x_factor", "change_y_factor",
-        #     "distance", 'current', 'rain', 'snowfall', 'wind_force', 'wind_direc', "resist_ratio"]
-        
+        obs = self._get_observation().copy()
+
+        actions = self.actions[-25:].copy()
+
+        # index of features only used in the fc model
+        fc_feature_index = [0, 1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12]
+
         # get model inputs
-        past_time_features = np.zeros([25, 15])
-        past_time_features[:, 0] = obs[-25:, 0]
-        past_time_features[:, 1:4] = actions[-25:, ] # speed, heading, mode
-        past_time_features[:, 4:13] = obs[-25:, [1,2,5,6,7,8,9,10,11]]
-        past_time_features[:, 13:15] = obs[-25:, 16:18]
+        past_time_features = np.zeros([25, 17])
+        past_time_features[:, 0] = obs[:, 0]
+        past_time_features[:, 1:4] = actions[:] # speed, heading, mode
+        past_time_features[:, 4:15] = obs[:, 1:12]
+        past_time_features[:, -2:] = obs[:, 16:18]**2
 
         future_time_features = past_time_features[-5:].copy()
-        future_time_features[:, 0] = future_time_features[:, 0] + 5
+        future_time_features[:, 0] = future_time_features[:, 0] + 5/120
         future_time_features[0, [1,2,3]] = speed, heading, mode
         future_time_features[0, 4] = heading - past_time_features[-1, 2]
-
-        past_values = obs[-25:, [16, 17]].copy()
-        past_values[:, 0] = (past_values[:, 0])**2
-        past_values[:, 1] = (past_values[:, 1])**4
-
-        past_time_features_loc = past_time_features.copy()
-        past_time_features_loc[:, 8:] = past_time_features_loc[:, 6:-2]
-        past_time_features_loc[:, [6,7]] = obs[-25:, [3,4]]
-        future_time_features_loc = future_time_features.copy()
-        future_time_features_loc[:, 8:] = future_time_features_loc[:, 6:-2]
-        future_time_features_loc[:, [6,7]] = past_time_features_loc[-5:, [3,4]].copy()
         change_x = np.cos((heading+90) * np.pi / 180)
         change_y = np.sin((heading-90) * np.pi / 180)
-        future_time_features_loc[0, [6,7]] = change_x, change_y
-        past_values_loc = obs[-25:, -2:]
+        future_time_features[0, [13,14]] = change_x, change_y
+
+        past_values = obs[:, -2:].copy()
 
         # predict fc, sog, long, lat
-        fc, sog = self._predict(past_values, past_time_features, future_time_features)
-        lat,long = self._predict_loc(past_values_loc, past_time_features_loc, future_time_features_loc)
+        fc2, sog2 = self._predict(past_time_features[:, 15:17], past_time_features[:,fc_feature_index], 
+                                  future_time_features[:, fc_feature_index], self.tf_fc, self.gru_fc)
+        lat, long = self._predict(past_values, past_time_features, future_time_features, 
+                                  self.tf_loc, self.gru_loc)
+        fc, sog = min(1, max(0, fc2)**0.5), min(1, max(0, sog2)**0.5)
 
         # generate next observation and update obs list
         new_observe = future_obs
         new_observe[0] = future_time_features[0, 0]
         new_observe[1:3] = future_time_features[0, 4:6]
-        new_observe[3:5] = change_x, change_y 
-        distance = ((self.goal_long_t-long)**2 + \
-                             (self.goal_lat_t-lat)**2 )**0.5
-        new_observe[5] = distance
-        new_observe[6:16] = future_obs[6:16]
-        new_observe[[16,17,18,19]] = fc, sog, lat, long
-        # new_observe[16:19]] = future_obs[16:19]
+        distance = ((self.goal_long-long)**2 + (self.goal_lat-lat)**2 )**0.5
+        new_observe[3] = distance
+        new_observe[-4:] = fc, sog, lat, long
+        # new_observe[-4:] = future_obs[16:19]
 
         # append new observations and actions
         self.obs = np.append(self.obs, np.expand_dims(new_observe, 0), axis=0)
@@ -169,59 +201,40 @@ class VesselEnvironment(gym.Env):
 
         return fc ,sog, lat, long
 
-    def _predict_loc(self, past_values, past_time_features, future_time_features):
-        self.model_loc.eval()
-        self.model_loc.to(self.device)
-        # add 1 dimension to the inputs
+    def _predict(self, past_values, past_time_features, future_time_features, tf_model, gru_model):
         future_time_features = torch.from_numpy(np.expand_dims(future_time_features, 0)).float().to(self.device)
         past_values = torch.from_numpy(np.expand_dims(past_values, 0)).float().to(self.device)
         past_time_features = torch.from_numpy(np.expand_dims(past_time_features, 0)).float().to(self.device)
         static_real_features = torch.from_numpy(np.expand_dims(self.statics, 0)).float().to(self.device)
         past_observed_mask = torch.ones(past_values.shape).to(self.device)
-        
-        with torch.no_grad():
-            outputs = self.model_loc.generate(past_values=past_values, past_time_features=past_time_features,
-                    static_real_features=static_real_features, past_observed_mask=past_observed_mask,
-                    future_time_features=future_time_features)
-        outputs = outputs.sequences.mean(dim=1).detach().cpu().numpy()
-        lat, long= outputs[0,0,0], outputs[0,0,1]
-        return lat, long    
 
-    def _predict(self, past_values, past_time_features, future_time_features):
-        self.model.eval()
-        self.model.to(self.device)
-        future_time_features = torch.from_numpy(np.expand_dims(future_time_features, 0)).float().to(self.device)
-        past_values = torch.from_numpy(np.expand_dims(past_values, 0)).float().to(self.device)
-        past_time_features = torch.from_numpy(np.expand_dims(past_time_features, 0)).float().to(self.device)
-        static_real_features = torch.from_numpy(np.expand_dims(self.statics, 0)).float().to(self.device)
-        past_observed_mask = torch.ones(past_values.shape).to(self.device)
-    
+        # print(past_values.shape, past_time_features.shape, future_time_features.shape)
         # make prediction
         with torch.no_grad():
-            outputs = self.model.generate(past_values=past_values, past_time_features=past_time_features,
+            outputs = tf_model.generate(past_values=past_values, past_time_features=past_time_features,
                     static_real_features=static_real_features, past_observed_mask=past_observed_mask,
-                    future_time_features=future_time_features)
-        outputs = outputs.sequences.mean(dim=1).detach().cpu().numpy()
-        fc2, sog4 = outputs[0,0,0], outputs[0,0,1],
-        return max(0, min(1, fc2**0.5)), max(0, min(1, sog4**0.25))
+                    future_time_features=future_time_features).sequences.mean(dim=1)
+            outputs = gru_model(outputs, past_time_features).detach().cpu().numpy()
+        return outputs[0,0,0], outputs[0,0,1]
 
     def _get_reward(self, long, lat, fc):
         # reward 1 distance to the top 1
-        reward1 = -((long-self.top1.loc[self.current_step, "LONGITUDE"])**2 + (lat-self.top1.loc[self.current_step, "LATITUDE"])**2 )**0.5
+        reward1 = - ((long-self.top1.loc[self.current_step, "LONGITUDE"])**2 + (lat-self.top1.loc[self.current_step, "LATITUDE"])**2 )**0.5
         if reward1 > -0.05:
             reward1 = 0
         reward1 = reward1*10
         # reward 2 fc and done reward
         reward2 = -fc
-        # reward 3 mimicc reward
+        # reward 3 mimic reward
         if self.current_step < len(self.data):
-            reward3 = -((long-self.data[self.current_step, 19])**2 + (lat-self.data[self.current_step, 18])**2 )**0.5
+            reward3 = - ((long-self.data[self.current_step, 19])**2 + (lat-self.data[self.current_step, 18])**2 )**0.5
         else:
-            reward3 = -((long-self.data[-1, 19])**2 + (lat-self.data[-1, 18])**2 )**0.5
+            reward3 = - ((long-self.data[-1, 19])**2 + (lat-self.data[-1, 18])**2 )**0.5
         # reward 4 timeout reward
         reward4 = 0
-        if self.current_step > 100:
+        if self.current_step >= 100:
             reward4 = -0.1*((self.current_step-90)//10)
+        # return (reward1 + reward2 + reward3 + reward4) / 4
         if self.reward_type == "mimic":
             self.reward = (reward1 + reward2 + reward3 + reward4) / 4
         elif self.reward_type == "top1":
@@ -231,16 +244,14 @@ class VesselEnvironment(gym.Env):
         
         return self.reward
 
-    def step(self, action, test=False):
+    def step(self, action):
         obs= self._get_observation()
         self.current_step += 1
 
         fc, sog, lat, long = self._take_action(action)
-        # TODO why there is a test flag?
-        if test:
-            return fc, sog, lat, long
+
         # get done and termination
-        done = (((long-self.goal_long_t)**2 + (lat-self.goal_lat_t)**2) < 1e-2)
+        done = (((long-self.goal_long)**2 + (lat-self.goal_lat)**2) < 1e-2)
         termination =  self.current_step >= self.max_steps
 
         reward = self._get_reward(long, lat, fc)
@@ -256,14 +267,14 @@ class VesselEnvironment(gym.Env):
     def _inv_transform_location(self, lat, long):
         array = np.zeros([1, 12],dtype=np.float64)
         array[0, [7,8]] = lat, long
-        lat, long = self.minmax_scaler.inverse_transform(array)[0,[7, 8]]
+        lat, long = self.scaler.inverse_transform(array)[0,[7, 8]]
         return lat, long
 
     def _transform_value(self, vals, indexes):
         array = np.zeros([1, 12],dtype=np.float64)
         for i in range(len(indexes)):
             array[0, indexes[i]] = vals[i]
-        transformed_val = self.minmax_scaler.transform(array)[0, [indexes]]
+        transformed_val = self.scaler.transform(array)[0, [indexes]]
         return transformed_val[0]
     
     def _reset(self):
@@ -463,6 +474,10 @@ class VesselEnvironment(gym.Env):
         root.mainloop()
 
 
+        # create a canvas object and place it in the window
+        # canvas = FigureCanvasTkAgg(fig,master=root_window)
+        # canvas.draw()
+        # canvas.get_tk_widget().pack(side=tk.TOP, fill=tk.BOTH, expand=1)
 
 
 # main function
@@ -476,14 +491,17 @@ def main():
     hn_top = pd.read_csv("data/H2N_top1.csv")
     nh_top = pd.read_csv("data/N2H_top1.csv")
     toptrips = (hn_top, nh_top)
-    # load forecasting models
-    model_path="data/new_3_final.pt"
-    model_loc_path="data/longlat_0_checkpoint4.pt"
 
-    model_path="data/fc_2_final.pt"
-    model_loc_path="data/longlat_3_final.pt"
+    # load models
+    # [tf_loc, tf_fc, gru_loc, gru_fc]
+    file_path = (
+    "data/gruloc_3_checkpoint22.pt",
+    "data/gru_5_checkpoint16.pt",
+    "data/gruloc_3_checkpoint22_gru.pt",
+    "data/gru_5_checkpoint16_gru.pt")
+
     # create environment
-    env = VesselEnvironment(rl_data, model_path, model_loc_path, scaler, toptrips)
+    env = VesselEnvironment(rl_data, scaler, toptrips, file_path)
     env.reset()
     env.render()
 
@@ -492,21 +510,23 @@ def main():
     sog_predicted = []
     lat_predicted = []
     long_predicted = []
-    for i in range(1,7):
+    trip_ids = []
+    for i in range(2):
         # reset environment
         env.reset()
+        trip_ids.append(env.trip_id)
 
 
-        length = rl_data[i]["observations"].shape[0]
+        length = rl_data[env.trip_id]["observations"].shape[0]
         fc = np.zeros((length))
         sog =  np.zeros((length))
         lat = np.zeros((length))
         long = np.zeros((length))
         for j in range(25, length):
-            action = rl_data[i]["actions"][j]
+            action = rl_data[env.trip_id]["actions"][j]
             # action[1] = action[1]
-            obs = env.step(action, test=True)
-            fc[j], sog[j], lat[j], long[j] = obs[0], obs[1], obs[2], obs[3]
+            obs = env.step(action)[0][-1, :]
+            fc[j], sog[j], lat[j], long[j] = obs[-4], obs[-3], obs[-2], obs[-1]
             # if done:
             #     break
         array1 = np.zeros((length, 12))
@@ -524,7 +544,8 @@ def main():
     longs = []
     lats = []
     # TODO why i start from 0?
-    for i in range(6):
+    for j in range(2):
+        i = trip_ids[j]
         array = np.zeros((len(rl_data[i]["observations"]), 12))
         array[:, 6] = rl_data[i]["observations"][:, -4]
         array[:, 9] = rl_data[i]["observations"][:, -3]
@@ -547,24 +568,21 @@ def main():
 
 
         ax1.plot(range(25, len(fc_predicted[i])), fc_predicted[i][25:], label='predictions'.format(i=2))
-        ax1.plot(range(25, len(fc_predicted[i])), fcs[i+1][25:], label='actuals'.format(i=1))
+        ax1.plot(range(25, len(fc_predicted[i])), fcs[i][25:], label='actuals'.format(i=1))
         ax1.legend(loc='best')
         ax2.plot(range(25, len(fc_predicted[i])), long_predicted[i][25:], label='predictions'.format(i=2))
-        ax2.plot(range(25, len(fc_predicted[i])), longs[i+1][25:], label='actuals'.format(i=1))
+        ax2.plot(range(25, len(fc_predicted[i])), longs[i][25:], label='actuals'.format(i=1))
         ax2.legend(loc='best')
         ax3.plot(range(25, len(fc_predicted[i])), lat_predicted[i][25:], label='predictions'.format(i=2))
-        ax3.plot(range(25, len(fc_predicted[i])), lats[i+1][25:], label='actuals'.format(i=1))
+        ax3.plot(range(25, len(fc_predicted[i])), lats[i][25:], label='actuals'.format(i=1))
         ax3.legend(loc='best')
         ax4.plot(range(25, len(sog_predicted[i])), sog_predicted[i][25:], label='predictions'.format(i=2))
-        ax4.plot(range(25, len(sog_predicted[i])), sogs[i+1][25:], label='actuals'.format(i=1))
+        ax4.plot(range(25, len(sog_predicted[i])), sogs[i][25:], label='actuals'.format(i=1))
         ax4.legend(loc='best')
-
-
-
-    plot(0)
+        plt.show()
+    plot(0)    
     plot(1)
-    # render
-    env.render()
+    print("done")
 
 if __name__ == "__main__":
     main()

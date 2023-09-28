@@ -1,5 +1,6 @@
 data/feature1.csv
 data/rl_data.pkl
+Simulator/test_gym_env.ipynb
 *__pycache__*
 .ipynb_checkpoints
 data/fc_checkpoints*
