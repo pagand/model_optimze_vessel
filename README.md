@@ -22,7 +22,6 @@ Clone the repo, and build the conda environment:
 git clone git@github.com:pagand/model_optimze_vessel.git
 cd model_optimze_vessel
 conda create -n vessel python=3.9
-conda install -n vessel pip
 conda activate vessel
 pip install -r requirements.txt
 ```
@@ -51,8 +50,6 @@ Install Huggingface transformers or follow [the link](https://huggingface.co/doc
 ```Shell
 pip install transformers
 ```
-
-
 
 To download the RL dataset, please run
 ```Shell
