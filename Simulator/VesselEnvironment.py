@@ -372,7 +372,6 @@ def main():
 
     # create environment
     env = VesselEnvironment(rl_data, scaler, toptrips, file_path)
-    env.reset()
     # env.render()
 
 
@@ -380,18 +379,20 @@ def main():
     sog_predicted = []
     lat_predicted = []
     long_predicted = []
-    for i in range(1,7):
+    trip_ids = []
+    for i in range(2):
         # reset environment
         env.reset()
+        trip_ids.append(env.trip_id)
 
 
-        length = rl_data[i]["observations"].shape[0]
+        length = rl_data[env.trip_id]["observations"].shape[0]
         fc = np.zeros((length))
         sog =  np.zeros((length))
         lat = np.zeros((length))
         long = np.zeros((length))
         for j in range(25, length):
-            action = rl_data[i]["actions"][j]
+            action = rl_data[env.trip_id]["actions"][j]
             # action[1] = action[1]
             obs = env.step(action)[0][-1, :]
             fc[j], sog[j], lat[j], long[j] = obs[-4], obs[-3], obs[-2], obs[-1]
@@ -412,7 +413,8 @@ def main():
     longs = []
     lats = []
     # TODO why i start from 0?
-    for i in range(6):
+    for j in range(2):
+        i = trip_ids[j]
         array = np.zeros((len(rl_data[i]["observations"]), 12))
         array[:, 6] = rl_data[i]["observations"][:, -4]
         array[:, 9] = rl_data[i]["observations"][:, -3]
@@ -435,20 +437,21 @@ def main():
 
 
         ax1.plot(range(25, len(fc_predicted[i])), fc_predicted[i][25:], label='predictions'.format(i=2))
-        ax1.plot(range(25, len(fc_predicted[i])), fcs[i+1][25:], label='actuals'.format(i=1))
+        ax1.plot(range(25, len(fc_predicted[i])), fcs[i][25:], label='actuals'.format(i=1))
         ax1.legend(loc='best')
         ax2.plot(range(25, len(fc_predicted[i])), long_predicted[i][25:], label='predictions'.format(i=2))
-        ax2.plot(range(25, len(fc_predicted[i])), longs[i+1][25:], label='actuals'.format(i=1))
+        ax2.plot(range(25, len(fc_predicted[i])), longs[i][25:], label='actuals'.format(i=1))
         ax2.legend(loc='best')
         ax3.plot(range(25, len(fc_predicted[i])), lat_predicted[i][25:], label='predictions'.format(i=2))
-        ax3.plot(range(25, len(fc_predicted[i])), lats[i+1][25:], label='actuals'.format(i=1))
+        ax3.plot(range(25, len(fc_predicted[i])), lats[i][25:], label='actuals'.format(i=1))
         ax3.legend(loc='best')
         ax4.plot(range(25, len(sog_predicted[i])), sog_predicted[i][25:], label='predictions'.format(i=2))
-        ax4.plot(range(25, len(sog_predicted[i])), sogs[i+1][25:], label='actuals'.format(i=1))
+        ax4.plot(range(25, len(sog_predicted[i])), sogs[i][25:], label='actuals'.format(i=1))
         ax4.legend(loc='best')
         plt.show()
     plot(0)    
     plot(1)
+    print("done")
 
 if __name__ == "__main__":
     main()
