@@ -7,3 +7,4 @@ data/fc_checkpoints*
 optimization/d3rlpy_logs*
 *wget-log*
 *.swo
+*.DS_Store

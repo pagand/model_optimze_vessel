@@ -57,6 +57,7 @@ class VesselEnvironment(gym.Env):
         self.manual = False
         self.run = False
         self.done =False
+        self.scale_var = False
         self.max_steps = 124
         self.trip_id = 0
         self.reward_type = reward_type
@@ -158,6 +159,22 @@ class VesselEnvironment(gym.Env):
         obs = self._get_observation().copy()
 
         actions = self.actions[-25:].copy()
+
+        # obs_cols = [0"Time2", 1"turn", 2"acceleration",
+        #    3'change_x_factor', 4'change_y_factor', 5"distance",
+        #    6'current', 7'rain', 8'snowfall',9 'wind_force',10 'wind_direc', 11"resist_ratio",
+        #    12"is_weekday",13 'direction', 14"season",15"hour", 
+        #    16"FC", 17"SOG", 18"LATITUDE", 19'LONGITUDE',
+        #    ], 
+        # action_cols = ["SPEED", "HEADING", "MODE"]
+        # time_feature = ["Time2", "SPEED", "HEADING", "MODE", "turn", "acceleration",
+        #     "distance", 'current', 'rain', 'snowfall', 'wind_force', 'wind_direc', "resist_ratio", 
+        #     "FC", "SOG"]
+        # static_categorical_feature = ["is_weekday", 'direction',"season", "hour"]
+        # y_cols = ["FC2", "SOG4"]
+        # dynamic_real_feature = [["Time2", "SPEED", "HEADING", "MODE", "turn", "acceleration",
+        #     "change_x_factor", "change_y_factor",
+        #     "distance", 'current', 'rain', 'snowfall', 'wind_force', 'wind_direc', "resist_ratio"]
 
         # index of features only used in the fc model
         fc_feature_index = [0, 1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12]
@@ -271,6 +288,8 @@ class VesselEnvironment(gym.Env):
         return lat, long
 
     def _transform_value(self, vals, indexes):
+        # transform_cols = [ 'current', 'rain', 'snowfall', "pressure", 'wind_force', "resist_ratio",
+#        'FC', "LATITUDE", 'LONGITUDE', 'SOG', "DEPTH", "SPEED"]
         array = np.zeros([1, 12],dtype=np.float64)
         for i in range(len(indexes)):
             array[0, indexes[i]] = vals[i]
@@ -335,8 +354,8 @@ class VesselEnvironment(gym.Env):
         
         # ax.scatter(long_lat[:,1],long_lat[:,0],c=stw, s=1)
         self.ax.scatter(long,lat, s=1)
-        # ax.set_xlim(xmin = -124.0, xmax= -123.2)
-        # ax.set_ylim(ymin=49.15, ymax=49.45)
+        self.ax.set_xlim(xmin = -124.0, xmax= -123.2)
+        self.ax.set_ylim(ymin=49.15, ymax=49.45)
         plt.xticks(fontsize=7)
         plt.yticks(fontsize=7,rotation=90)
         # ax.axis("off")
@@ -359,27 +378,37 @@ class VesselEnvironment(gym.Env):
         reward_cum_label = Label(root, text="Cumulative Reward: "+str(round(self.reward_cum, 3)))
         reward_cum_label.grid(row=2, column=1, sticky=W+E+N+S)
         current_engine_label = Label(root, text="Type: Manual" if self.manual else "Type: Auto")
-        current_engine_label.grid(row=3, column=0, sticky=W+E+N+S)
+        current_engine_label.grid(row=3, column=1, sticky=W+E+N+S)
 
-
+        shows = self.obs[-1].copy()
+        if self.scale_var:
+            # transformed values in  the original space
+            array1 = np.array([shows[6],shows[7],shows[8],0, shows[9], shows[11],shows[16], shows[18], shows[19], shows[17],0,0  ])
+            array1 = array1[np.newaxis, :]
+            array1 = self.scaler.inverse_transform(array1)
+            array1 = array1[0,:]
+            shows[6:9] = array1[0:3]
+            shows[9] = array1[4]
+            shows[11] = array1[5]
+            shows[16:20] = [array1[6],array1[9],array1[7],array1[8]]
         # show the observation in the GUI in colomn 1
         obs_label = Label(root, text="Observations: " + \
-                          "\nFC: "+str(round(self.obs[-1, 16], 3)) +\
-                          "\nSOG: "+str(round(self.obs[-1, 17], 3)) +\
-                            "\nLatitude: "+str(round(self.obs[-1, 18], 3)) +\
-                            "\nLongitude: "+str(round(self.obs[-1, 19], 3)) +\
-                          "\nTime: "+str(round(self.obs[-1, 0], 3)) + \
-                          "\nTurn: "+str(round(self.obs[-1, 1], 3))  + \
-                            "\nAcceleration: "+str(round(self.obs[-1, 2], 3))  + \
-                            "\nDistance: "+str(round(self.obs[-1, 5], 3))+ \
-                            "\nCurrent: "+str(round(self.obs[-1, 6], 3))+ \
-                            "\nWind Force: "+str(round(self.obs[-1, 9], 3))+ \
-                            "\nWind Direction: "+str(round(self.obs[-1, 10], 3))+ \
-                            "\nResist Ratio: "+str(round(self.obs[-1, 11], 3))+ \
-                            "\nIs Weekday: "+str(round(self.obs[-1, 12], 3))+ \
-                            "\nSeason: "+str(round(self.obs[-1, 14], 3))+ \
-                            "\nHour: "+str(round(self.obs[-1, 15], 3))+ \
-                            "\nDirection: "+str(round(self.obs[-1, 13], 3)))
+                          "\nFC: "+str(round(shows[ 16], 3)) +\
+                          "\nSOG: "+str(round(shows[17], 3)) +\
+                            "\nLatitude: "+str(round(shows[18], 3)) +\
+                            "\nLongitude: "+str(round(shows[ 19], 3)) +\
+                          "\nTime: "+str(round(shows[ 0], 3)) + \
+                          "\nTurn: "+str(round(shows[ 1], 3))  + \
+                            "\nAcceleration: "+str(round(shows[ 2], 3))  + \
+                            "\nDistance: "+str(round(shows[5], 3))+ \
+                            "\nCurrent: "+str(round(shows[6], 3))+ \
+                            "\nWind Force: "+str(round(shows[9], 3))+ \
+                            "\nWind Direction: "+str(round(shows[10], 3))+ \
+                            "\nResist Ratio: "+str(round(shows[11], 3))+ \
+                            "\nIs Weekday: "+str(round(shows[12], 3))+ \
+                            "\nSeason: "+str(round(shows[14], 3))+ \
+                            "\nHour: "+str(round(shows[15], 3))+ \
+                            "\nDirection: "+str(round(shows[13], 3)))
         obs_label.grid(row=0, column=3, sticky=W+E+N+S)
 
 
@@ -439,14 +468,26 @@ class VesselEnvironment(gym.Env):
                 heading_entry['state'] = tk.NORMAL
                 mode_entry['state'] = tk.NORMAL
                 self.manual = True
+                
+        def _switchButtonState1():
+            if (self.scale_var == True):
+                self.scale_var = False
+                self._update_results()
+            else:
+                self.scale_var = True
+                self._update_results()
 
         # create button widget that change label from auto to manual and viceversal as click with the states
         button3 = tk.Button(root, text="Auto/manual",command = _switchButtonState)
-        button3.grid(row=1, column=3, sticky=W+E+N+S)
+        button3.grid(row=3, column=0, sticky=W+E+N+S)
 
 
         button4 = tk.Button(root, text="Resume/stop",command = self._resume)
         button4.grid(row=1, column=2, sticky=W+E+N+S)
+
+        # change the self.scale_var to true or false as the user click on the button
+        button5 = tk.Button(root, text="scaled/actual", command = _switchButtonState1)
+        button5.grid(row=1, column=3, sticky=W+E+N+S)
 
 
 
