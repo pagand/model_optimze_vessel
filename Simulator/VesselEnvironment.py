@@ -48,7 +48,7 @@ class GRU_update(nn.Module):
         return pred_wp
     
 class VesselEnvironment(gym.Env):
-    """A stock trading environment for OpenAI gym"""
+    """An environment for OpenAI gym"""
     metadata = {'render.modes': ['human']}
     # model = [tf_loc, gru_loc, tf_fc, gru_fc]
     def __init__(self, rl_data, scaler, toptrips, models_file_path, reward_type = "mimic"):
@@ -300,6 +300,7 @@ class VesselEnvironment(gym.Env):
         self.ax.clear()
         self.reset()
         self.status = "Reset"
+        self.done = False
         self._update_results()
     
     # create  attribute '_next_step' for button widget
@@ -336,7 +337,7 @@ class VesselEnvironment(gym.Env):
             self._next_step(flag=True)
             self.root.update()
             # make delay
-            self.root.after(1000)
+            self.root.after(100)
         
         if self.current_step > self.max_steps:
             self.status = "Reached max steps"
