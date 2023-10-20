@@ -150,7 +150,6 @@ class VesselEnvironment(gym.Env):
     def _take_action(self, action):
         # get actions
         speed, heading, mode = action
-        heading = heading
         mode = int(mode>0.5)
         if self.current_step < self.rl_data[self.trip_id]["observations"].shape[0]:
             future_obs = self.rl_data[self.trip_id]["observations"][self.current_step].copy()
@@ -160,9 +159,9 @@ class VesselEnvironment(gym.Env):
 
         actions = self.actions[-25:].copy()
 
-        # obs_cols = [0"Time2", 1"turn", 2"acceleration",
-        #    3'change_x_factor', 4'change_y_factor', 5"distance",
-        #    6'current', 7'rain', 8'snowfall',9 'wind_force',10 'wind_direc', 11"resist_ratio",
+        # obs_cols = [0"Time2", 1"turn", 2"acceleration", 3"distance",
+        #    4'current', 5'rain', 6'snowfall',7 'wind_force',8 'wind_direc', 9"resist_ratio",
+        #   '10change_x_factor', '11change_y_factor', 
         #    12"is_weekday",13 'direction', 14"season",15"hour", 
         #    16"FC", 17"SOG", 18"LATITUDE", 19'LONGITUDE',
         #    ], 
@@ -301,6 +300,22 @@ class VesselEnvironment(gym.Env):
         self.reset()
         self.status = "Reset"
         self.done = False
+
+        # set the constant values for the plot
+        self.ax.set_xlim(xmin = -124.0, xmax= -123.2)
+        self.ax.set_ylim(ymin=49.15, ymax=49.45)
+        plt.xticks(fontsize=7)
+        plt.yticks(fontsize=7)
+        # make the axis equal
+        self.ax.set_aspect('equal', adjustable='box')
+        # grid the axis
+        self.ax.grid(True, which='both')
+        # increase the precision of the axis
+        self.ax.yaxis.set_major_locator(plt.MultipleLocator(0.05))
+        if not self.scale_var:
+            # change the x,y tick values
+            self.ax.set_xticklabels(np.round(np.arange(-0.06, 1.10, 0.14),4).tolist())
+            self.ax.set_yticklabels(np.round(np.arange(-0.38, 1.08 , 0.2),4).tolist())
         self._update_results()
     
     # create  attribute '_next_step' for button widget
@@ -337,7 +352,7 @@ class VesselEnvironment(gym.Env):
             self._next_step(flag=True)
             self.root.update()
             # make delay
-            self.root.after(100)
+            self.root.after(500)
         
         if self.current_step > self.max_steps:
             self.status = "Reached max steps"
@@ -354,25 +369,35 @@ class VesselEnvironment(gym.Env):
             lat[i], long[i] = self._inv_transform_location(lat[i],long[i])
         
         # ax.scatter(long_lat[:,1],long_lat[:,0],c=stw, s=1)
-        self.ax.scatter(long,lat, s=1)
-        self.ax.set_xlim(xmin = -124.0, xmax= -123.2)
-        self.ax.set_ylim(ymin=49.15, ymax=49.45)
-        plt.xticks(fontsize=7)
-        plt.yticks(fontsize=7,rotation=90)
+        self.ax.scatter(long,lat, s=1, color="blue")
+        # creat a circle to show the goal
+        goal_loc = self._inv_transform_location(self.goal_lat, self.goal_long)
+        circle = plt.Circle((goal_loc[1], goal_loc[0]), 0.02, color='r')
+        self.ax.add_artist(circle)
         # ax.axis("off")
-        plt.subplots_adjust(top=0.925,     # Further fix clipping of text in the figure
-                            bottom=0.16,
-                            left=0.11,
-                            right=0.90,
-                            hspace=0.2,
-                            wspace=0.2)
-        
+        # plt.subplots_adjust(top=0.925,     # Further fix clipping of text in the figure
+                            # bottom=0.16,
+                            # left=0.11,
+                            # right=0.90,
+                            # hspace=0.2,
+                            # wspace=0.2)
+
+        # add an arow to show the current heading and stick it to the scatter point
+        heading = self.actions[-2, 1] if self.direction else self.actions[-2, 1]+np.pi
+        # delete the previous arrow
+        for i in range(len(self.ax.get_children())-3):
+            if str(self.ax.get_children()[i])=='FancyArrow()':
+                self.ax.get_children()[i].remove()
+        self.ax.arrow(long[-1], lat[-1], 0.0005*np.cos(heading), 0.0005*np.sin(heading), width=0.005, color="red")
+     
+
         canvas = FigureCanvasTkAgg(self.fig, master=root)
         canvas.draw()
         canvas.get_tk_widget().grid(row=0, column=0, columnspan=3, sticky=W+E+N+S)
     
         # show the current step, reward and cumulative reward in the GUI in colomn 1
         step_label = Label(root, text="Step: "+str(self.current_step))
+
         step_label.grid(row=2, column=0, sticky=W+E+N+S)
         reward_label = Label(root, text="Current Reward: "+str(round(self.reward, 3)))
         reward_label.grid(row=2, column=2, sticky=W+E+N+S)
@@ -384,28 +409,34 @@ class VesselEnvironment(gym.Env):
         shows = self.obs[-1].copy()
         if self.scale_var:
             # transformed values in  the original space
-            array1 = np.array([shows[6],shows[7],shows[8],0, shows[9], shows[11],shows[16], shows[18], shows[19], shows[17],0,0  ])
+            # transform_cols = [ 'current', 'rain', 'snowfall', "pressure", 'wind_force', "resist_ratio",
+#        'FC', "LATITUDE", 'LONGITUDE', 'SOG', "DEPTH", "SPEED"]
+            array1 = np.array([shows[4],shows[5],shows[6],0, shows[7], shows[9],shows[16], shows[18], shows[19], shows[17],0,self.actions[-1, 0]  ])
             array1 = array1[np.newaxis, :]
             array1 = self.scaler.inverse_transform(array1)
             array1 = array1[0,:]
-            shows[6:9] = array1[0:3]
-            shows[9] = array1[4]
-            shows[11] = array1[5]
+            shows[4:7] = array1[0:3]
+            shows[7] = array1[4]
+            shows[9] = array1[5]
             shows[16:20] = [array1[6],array1[9],array1[7],array1[8]]
         # show the observation in the GUI in colomn 1
+        #  [0"Time2", 1"turn", 2"acceleration", 3"distance",
+        #    4'current', 5'rain', 6'snowfall',7 'wind_force',8 'wind_direc', 9"resist_ratio",
+        #   '10change_x_factor', '11change_y_factor', 
+        #    12"is_weekday",13 'direction', 14"season",15"hour", 
+        #    16"FC", 17"SOG", 18"LATITUDE", 19'LONGITUDE',
         obs_label = Label(root, text="Observations: " + \
                           "\nFC: "+str(round(shows[ 16], 3)) +\
                           "\nSOG: "+str(round(shows[17], 3)) +\
                             "\nLatitude: "+str(round(shows[18], 3)) +\
                             "\nLongitude: "+str(round(shows[ 19], 3)) +\
-                          "\nTime: "+str(round(shows[ 0], 3)) + \
-                          "\nTurn: "+str(round(shows[ 1], 3))  + \
-                            "\nAcceleration: "+str(round(shows[ 2], 3))  + \
-                            "\nDistance: "+str(round(shows[5], 3))+ \
-                            "\nCurrent: "+str(round(shows[6], 3))+ \
-                            "\nWind Force: "+str(round(shows[9], 3))+ \
-                            "\nWind Direction: "+str(round(shows[10], 3))+ \
-                            "\nResist Ratio: "+str(round(shows[11], 3))+ \
+                          "\nTurn: "+str(round(shows[1], 3))  + \
+                            "\nAcceleration: "+str(round(shows[2], 3))  + \
+                            "\nDistance: "+str(round(shows[3], 3))+ \
+                            "\nCurrent: "+str(round(shows[4], 3))+ \
+                            "\nWind Force: "+str(round(shows[7], 3))+ \
+                            "\nWind Direction: "+str(round(shows[8], 3))+ \
+                            "\nResist Ratio: "+str(round(shows[9], 3))+ \
                             "\nIs Weekday: "+str(round(shows[12], 3))+ \
                             "\nSeason: "+str(round(shows[14], 3))+ \
                             "\nHour: "+str(round(shows[15], 3))+ \
@@ -416,7 +447,8 @@ class VesselEnvironment(gym.Env):
         #   show the actions in the GUI in colomn 1
         obs_label = Label(root, text="Applied actions ")
         obs_label.grid(row=3, column=2, sticky=W+E+N+S)
-        obs_label = Label(root, text=str(round(self.actions[-1, 0], 3)))
+        text0 = str(round(self.actions[-1, 0], 3)) if not self.scale_var else str(round(array1[-1], 3))
+        obs_label = Label(root, text=text0)
         obs_label.grid(row=4, column=2, sticky=W+E+N+S)
         obs_label = Label(root, text=str(round(self.actions[-1, 1], 3)))
         obs_label.grid(row=5, column=2, sticky=W+E+N+S)
@@ -440,12 +472,31 @@ class VesselEnvironment(gym.Env):
         # title
         root.title("West coast vessel simulator")
         # create a canvas object and display it
-        root.geometry('700x480')
+        root.geometry('700x400')
 
 
         # generate the figure and plot object which will be linked to the root element
         self.fig, self.ax = plt.subplots()
-        self.fig.set_size_inches(5.5, 3.5)
+        self.fig.set_size_inches(5.5, 2.5)
+
+        # set the constant values for the plot
+        self.ax.set_xlim(xmin = -124.0, xmax= -123.2)
+        self.ax.set_ylim(ymin=49.15, ymax=49.45)
+        plt.xticks(fontsize=7)
+        plt.yticks(fontsize=7)
+        # make the axis equal
+        self.ax.set_aspect('equal', adjustable='box')
+        # grid the axis
+        self.ax.grid(True, which='both')
+        # increase the precision of the axis
+        self.ax.yaxis.set_major_locator(plt.MultipleLocator(0.05))
+
+        # get curent x/yticklabels only the list of values
+        self.xticklabels = np.round(self.ax.get_xticks(),2).tolist()
+        self.yticklabels = np.round(self.ax.get_yticks(),2).tolist()
+
+        self.ax.set_xticklabels(np.round(np.arange(-0.06, 1.10, 0.14),4).tolist())
+        self.ax.set_yticklabels(np.round(np.arange(-0.38, 1.08 , 0.2),4).tolist())
 
         # update the results
         self._update_results()
@@ -473,9 +524,14 @@ class VesselEnvironment(gym.Env):
         def _switchButtonState1():
             if (self.scale_var == True):
                 self.scale_var = False
+                # change the x,y tick values
+                self.ax.set_xticklabels(np.round(np.arange(-0.06, 1.10, 0.14),4).tolist())
+                self.ax.set_yticklabels(np.round(np.arange(-0.38, 1.08 , 0.2),4).tolist())
                 self._update_results()
             else:
                 self.scale_var = True
+                self.ax.set_xticklabels(self.xticklabels)
+                self.ax.set_yticklabels(self.yticklabels)
                 self._update_results()
 
         # create button widget that change label from auto to manual and viceversal as click with the states
