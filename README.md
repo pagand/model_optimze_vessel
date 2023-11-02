@@ -106,6 +106,16 @@ For this model, please refer to the model/sequential
 ## Cite
 
 ```
+@inproceedings{Fan2024sequential,
+  title={Sequential Modeling in Marine Navigation: Case Study on a Passenger Vessel},
+  author={Fan, Yimeng and  Agand, Pedram  and Chen, Mo and Park, Edward J and Kennedy, Allison and Bae, Chanwoo},
+  booktitle={Proceedings of the AAAI conference on artificial intelligence},
+  volume={},
+  number={},
+  pages={},
+  year={2024}
+}
+
   @article{agand2023fuel,
   title={Fuel consumption prediction for a passenger ferry using machine learning and in-service data: A comparative study},
   author={Agand, Pedram and Kennedy, Allison and Harris, Trevor and Bae, Chanwoo and Chen, Mo and Park, Edward J},
