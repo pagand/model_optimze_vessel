@@ -1,6 +1,8 @@
 # Sequential Modeling in Marine Navigation: Case Study on a Passenger Vessel
 West Coat Vessel - visualization/classification/prediction
 
+[Website](https://upaspro.com/sequential-modeling-in-marine-navigation/)
+
 Credits:
 
 This project is done in collaboration with Simon Fraser University (SFU) and National Research Council Canada (NRC)
