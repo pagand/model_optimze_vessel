@@ -3,7 +3,7 @@ West Coat Vessel
 
 [Website](https://upaspro.com/sequential-modeling-in-marine-navigation/)
 
-
+## Simulator (V0.1)
 
 https://github.com/pagand/model_optimze_vessel/assets/58544477/2816de84-f522-4fe6-9851-dbb3e038eac5
 
