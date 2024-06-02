@@ -3,7 +3,8 @@ West Coat Vessel
 
 [Website](https://upaspro.com/sequential-modeling-in-marine-navigation/)
 
-[paper](https://ojs.aaai.org/index.php/AAAI/article/view/30439)
+[paper 1](https://www.sciencedirect.com/science/article/pii/S0029801823016554)
+[paper 2](https://ojs.aaai.org/index.php/AAAI/article/view/30439)
 
 ## Simulator (V0.1)
 
